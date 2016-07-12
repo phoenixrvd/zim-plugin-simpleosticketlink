@@ -253,5 +253,6 @@ class osTicket(BugTracker):
         return {
             'passwd': self.password,
             'username': self.user,
+            'userid': self.user,
             '__CSRFToken__': crf
         }
