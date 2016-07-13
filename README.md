@@ -11,7 +11,7 @@ When `<Ctrl> + <Shift> + O` is clicked, the following happens:
 
 
 Installation
-============
+------------
 
 * Download as ZIP and extract under "$HOME/.local/share/zim/plugins/simpleosticketlink"
 * Activate Plugin and entry the login data to osTicket system
