@@ -1,4 +1,6 @@
 # coding=utf-8
+import sys
+
 from zim.actions import action
 from zim.gui.pageview import PageViewExtension
 from zim.gui.widgets import Dialog, MessageDialog
@@ -42,7 +44,9 @@ class SimpleOSTicketLinkPlugin(PluginClass):
 
     @classmethod
     def check_dependencies(cls):
-        return bool(requests and bs4 and re), [
+        sys_python_version = sys.version_info[0] >= 3
+        return bool(sys_python_version and requests and bs4 and re), [
+            ('python3', sys_python_version, True),
             ('requests', requests is not None, True),
             ('bs4', bs4 is not None, True),
             ('re', re is not None, True)
