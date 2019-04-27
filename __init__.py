@@ -1,11 +1,8 @@
 # coding=utf-8
-import gtk
-
-
 from zim.actions import action
-from zim.gui import Dialog, MessageDialog
-from zim.gui.widgets import InputForm
-from zim.plugins import PluginClass, WindowExtension, extends
+from zim.gui.pageview import PageViewExtension
+from zim.gui.widgets import Dialog, MessageDialog
+from zim.plugins import PluginClass
 from abc import abstractmethod
 
 # Global resources including
@@ -24,9 +21,9 @@ except ImportError:
     re = None
 
 try:
-    import BeautifulSoup
+    import bs4
 except ImportError:
-    BeautifulSoup = None
+    bs4 = None
 
 
 class SimpleOSTicketLinkPlugin(PluginClass):
@@ -44,112 +41,32 @@ class SimpleOSTicketLinkPlugin(PluginClass):
     )
 
     @classmethod
-    def check_dependencies(klass):
-        return bool(requests or BeautifulSoup.BeautifulSoup or re), [
-            ('requests', not requests is None, True),
-            ('BeautifulSoup', not BeautifulSoup.BeautifulSoup is None, True),
-            ('re', not re is None, True)
+    def check_dependencies(cls):
+        return bool(requests and bs4 and re), [
+            ('requests', requests is not None, True),
+            ('bs4', bs4 is not None, True),
+            ('re', re is not None, True)
         ]
 
 
-@extends('MainWindow')
-class MainWindowExtension(WindowExtension):
-    uimanager_xml = '''
-        <ui>
-            <menubar name='menubar'>
-                <menu action='insert_menu'>
-                    <placeholder name='plugin_items'>
-                        <menuitem action='osticket_button_clicked'/>
-                    </placeholder>
-                </menu>
-            </menubar>
-        </ui>
-    '''
+class SimpleOSTicketLinkPageViewExtension(PageViewExtension):
 
-    def __init__(self, plugin, window):
-        WindowExtension.__init__(self, plugin, window)
-
-        # Define the bugtracker object as global, for the performance purpose
-        plugin.bt = osTicket()
-
-    @action(
-            _('osTicket Link'),
-            readonly=True,
-            accelerator='<Control><Shift>O'
-    )  # T: menu item
+    @action(_('osTicket Link'), accelerator='<Control><Shift>O', menuhints='insert')  # T: Menu item
     def osticket_button_clicked(self):
-        '''Run the TicketDialog'''
-        TicketDialog(self.window, self.plugin, self.window.pageview).run()
+        TicketDialog(self, osTicket()).run()
 
 
 class RequestError(Exception):
     pass
 
-class TicketDialog(Dialog):
-    def __init__(self, ui, notebook, pageview):
-        self.notebook = notebook
-        self.bt = notebook.bt
-        self.pageview = pageview
-        self.ui = ui
-
-        Dialog.__init__(
-                self,
-                ui,
-                _('Insert Ticket ID'),  # T: Dialog title
-                button=(_('_Insert'), 'gtk-ok'),  # T: Button label
-                defaultwindowsize=(245, 120)
-        )
-
-        self.form = InputForm(notebook=notebook)
-        self.vbox.pack_start(self.form, False)
-        self.form.add_inputs((
-            ('ticket', 'string', _('ID')),  # T: Ticket ID
-        ))
-
-        # Register global dielog key-press event, which is called for every input
-        self.add_events(gtk.gdk.KEY_PRESS_MASK)
-        self.connect('key-press-event', self.on_dialog_key_press)
-
-    def on_dialog_key_press(self, dialog, event):
-        # Close dialog on enter click
-        if event.keyval == gtk.keysyms.Return:
-            dialog.response(gtk.RESPONSE_OK)
-            return True
-
-    def do_response_ok(self):
-        self.bt.setup_config(self.notebook.preferences)
-
-        # get the ticket ID and prevent changes during http request
-        input = self.form.widgets.get('ticket')
-        input.set_editable(False)
-        ticket = input.get_text()
-        self.do_close(self)
-
-        # by empty string do nothing
-        if not ticket:
-            return True
-
-        try:
-            # Do Request to web page an set the response data formatted at cursor position
-            ticket_data = self.bt.get_ticket_data(ticket)
-            buffer = self.pageview.view.get_buffer()
-            buffer.insert_link_at_cursor(ticket_data['ticket'], ticket_data['url'])
-            buffer.insert_at_cursor(" " + ticket_data['title'] + "\n")
-        except RequestError as e:
-            MessageDialog(self, e.message).run()
-
-        return True
 
 class BugTracker:
-    def __init__(self):
-        pass
-
     session = None
 
     # Required-Setting for login
     # can be setted from map
     # @see Tracker.setup_config
-    url = "http://www.ostickethacks.com/demo/scp/"
+    url = "https://www.mantisbt.org/"
     user = ""
     password = ""
 
@@ -192,7 +109,7 @@ class BugTracker:
 
         try:
             response = self.session.post(url, data=post_data)
-            return BeautifulSoup.BeautifulSoup(response.content)
+            return bs4.BeautifulSoup(response.content)
         except:
             raise RequestError(_('Page is unreachable. Please check the URL in plugin settings.'))
 
@@ -237,8 +154,9 @@ class osTicket(BugTracker):
         return "login.php"
 
     def parse_ticket_page(self, soup, url, ticket):
-        ticket_title = soup.find("div", { "id" : "content" }).findAll('h2')[1].text
-        ticket_title_text = soup.find('title').text
+        titles = soup.find("div", { "id" : "content" }).findAll('h2')
+        ticket_title = titles[1].text
+        ticket_title_text = titles[0].text
 
         return {
             'ticket': ticket_title_text.strip(),
@@ -249,10 +167,48 @@ class osTicket(BugTracker):
     def get_login_post_data(self):
         login_url = self.url + self.get_login_path()
         response = self.do_request(login_url)
-        crf = response.find('input', attrs={'name': '__CSRFToken__'}).attrMap['value']
+        crf = response.find('input', attrs={'name': '__CSRFToken__'}).attrs['value']
         return {
             'passwd': self.password,
             'username': self.user,
             'userid': self.user,
             '__CSRFToken__': crf
         }
+
+
+class TicketDialog(Dialog):
+    def __init__(self, parent: PageViewExtension, bt: BugTracker):
+        self.notebook = parent.plugin
+        self.bt = bt
+        self.textview = parent.pageview.textview
+        self.ui = parent
+
+        Dialog.__init__(self, parent, title=_('Insert Ticket ID'), button=_('_Insert'))
+
+        self.add_form((
+            ('ticket', 'string', _('ID')),  # T: Ticket ID
+        ), {})
+
+    def do_response_ok(self):
+        self.bt.setup_config(self.notebook.preferences)
+
+        # get the ticket ID and prevent changes during http request
+        input = self.form.widgets.get('ticket')
+        input.set_editable(False)
+        ticket = input.get_text()
+        self.do_close(self)
+
+        # by empty string do nothing
+        if not ticket:
+            return True
+
+        try:
+            # Do Request to web page an set the response data formatted at cursor position
+            ticket_data = self.bt.get_ticket_data(ticket)
+            buffer = self.textview.get_buffer()
+            buffer.insert_link_at_cursor(ticket_data['ticket'], ticket_data['url'])
+            buffer.insert_at_cursor(" " + ticket_data['title'] + "\n")
+        except RequestError as e:
+            MessageDialog(self, str(e)).run()
+
+        return True
