@@ -158,13 +158,13 @@ class osTicket(BugTracker):
         return "login.php"
 
     def parse_ticket_page(self, soup, url, ticket):
-        titles = soup.find("div", { "id" : "content" }).findAll('h2')
+        titles = soup.find("div", { "id" : "content" }).findAll(['h2', 'h3'])
         ticket_title = titles[1].text
         ticket_title_text = titles[0].text
 
         return {
             'ticket': ticket_title_text.strip(),
-            'title': ticket_title,
+            'title': ticket_title.strip(),
             'url': url
         }
 
@@ -173,6 +173,7 @@ class osTicket(BugTracker):
         response = self.do_request(login_url)
         crf = response.find('input', attrs={'name': '__CSRFToken__'}).attrs['value']
         return {
+            'do': 'scplogin',
             'passwd': self.password,
             'username': self.user,
             'userid': self.user,
